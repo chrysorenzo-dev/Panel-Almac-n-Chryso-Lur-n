@@ -240,7 +240,43 @@ td a,.link{color:var(--accent-soft);font-weight:600;background:none;border:0;pad
 #tip{position:fixed;z-index:50;pointer-events:none;background:#111827;color:#ffffff;padding:6px 10px;border-radius:6px;font-size:12px;max-width:260px;display:none;white-space:pre-line;box-shadow:0 4px 12px rgba(0,0,0,.18)}
 .err{color:var(--bad);font-weight:500}
 </style>
+<style id="login-style">
+#loginGate{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;background:linear-gradient(135deg,#ffffff 0%,#f7fbef 55%,#eef6e2 100%);font-family:var(--font);color:var(--ink)}
+#loginGate[hidden]{display:none}
+#loginGate .lg-card{width:100%;max-width:400px;background:var(--surface);border:1px solid #d9e8c5;border-radius:16px;padding:28px 26px 22px;box-shadow:0 10px 30px rgba(15,23,42,.08)}
+#loginGate .lg-logo{display:flex;justify-content:center;height:44px;margin-bottom:14px}
+#loginGate .lg-logo img{max-height:42px;width:auto;object-fit:contain}
+#loginGate .lg-tag{display:block;text-align:center;font-size:11px;font-weight:600;letter-spacing:.08em;color:var(--accent-soft);margin-bottom:6px}
+#loginGate h1{font-size:18px;font-weight:700;text-align:center;margin:0 0 2px}
+#loginGate .lg-sub{text-align:center;color:var(--muted);font-size:12.5px;margin:0 0 20px}
+#loginGate label{display:block;font-size:12.5px;font-weight:600;margin:0 0 5px}
+#loginGate input{width:100%;padding:10px 12px;border:1px solid var(--line-strong);border-radius:10px;background:var(--surface);font-size:14px;margin-bottom:14px}
+#loginGate input:focus{border-color:var(--accent);outline:2px solid rgba(104,166,20,.25);outline-offset:0}
+#loginGate .btn{width:100%;padding:11px 16px}
+#loginGate .lg-err{min-height:18px;color:var(--bad);font-size:12.5px;margin:-4px 0 10px;text-align:center}
+#loginGate .lg-card.shake{animation:lgshake .35s}
+@keyframes lgshake{0%,100%{transform:translateX(0)}25%{transform:translateX(-8px)}75%{transform:translateX(8px)}}
+#loginGate .lg-sync{display:flex;justify-content:center;margin-top:16px}
+</style>
 </head><body>
+<div id="loginGate" role="dialog" aria-modal="true" aria-labelledby="lgTitle">
+  <div class="lg-card" id="lgCard">
+    <div class="lg-logo"><img id="lgLogo" alt="Chryso Saint-Gobain"></div>
+    <span class="lg-tag">CENTRO DE LOGÍSTICA · CHRYSO SAINT-GOBAIN</span>
+    <h1 id="lgTitle">Panel Almacén 1811</h1>
+    <p class="lg-sub">Ingresa con tu DNI para continuar</p>
+    <form id="lgForm" autocomplete="off">
+      <label for="lgUser">Usuario</label>
+      <input id="lgUser" name="usuario" type="text" inputmode="numeric" maxlength="8" placeholder="DNI" autocomplete="username">
+      <label for="lgPass">Contraseña</label>
+      <input id="lgPass" name="clave" type="password" inputmode="numeric" maxlength="8" placeholder="DNI" autocomplete="current-password">
+      <div class="lg-err" id="lgErr" aria-live="polite"></div>
+      <button class="btn" type="submit">Ingresar</button>
+    </form>
+    <div class="lg-sync"><div class="pill-st sync" id="lgSync"><i></i><span>Sincronizando con la nube…</span></div></div>
+  </div>
+</div>
+
 
 <div class="app">
   <header class="top">
@@ -798,4 +834,69 @@ syncFromSupabase(true);
 })();
 </script>
 <script id="preloaded-data" type="application/json">{"meta":{"file":"LAYOUT v3.0.xlsm","at":"2026-11-20T15:05:05.099Z"},"mov":[],"mats":{},"cells":[],"maxCol":43,"maestro":{},"maestroTotal":0}</script>
+<script id="login-script">
+(function(){
+const USERS={
+  '70548537':{name:'Renzo Ramirez',ini:'RL'},
+  '40605843':{name:'Julio Zegarra',ini:'JZ'},
+  '41802684':{name:'Martin Vacalla',ini:'MV'},
+  '72924463':{name:'Jorge Zorrilla',ini:'JZ'},
+  '77164209':{name:'Alfred Rossi',ini:'AR'}
+};
+const KEY='almacen1811_session';
+const gate=document.getElementById('loginGate');
+let cur=null;
+try{const s=sessionStorage.getItem(KEY);if(s&&USERS[s])cur=s}catch(e){}
+
+const logo=document.getElementById('chrysoLogo');
+if(logo)document.getElementById('lgLogo').src=logo.src;
+
+function applyUser(){
+  if(!cur)return;
+  const u=USERS[cur];
+  const av=document.querySelector('.avatar');
+  if(av){if(av.textContent!==u.ini)av.textContent=u.ini;av.title=u.name+' (clic para cerrar sesión)';av.style.cursor='pointer'}
+  const h=document.querySelector('.hero h2');
+  if(h&&h.textContent.indexOf('Bienvenido, Renzo.')===0)h.textContent=h.textContent.replace('Bienvenido, Renzo.','Bienvenido, '+u.name+'.');
+}
+const main=document.getElementById('main');
+if(main)new MutationObserver(applyUser).observe(main,{childList:true,subtree:true,characterData:true});
+
+function mirrorSync(){
+  const st=document.getElementById('status'),box=document.getElementById('lgSync');
+  if(!st||!box)return;
+  const c=st.className;
+  box.className='pill-st '+(c.indexOf('sync')>-1?'sync':c.indexOf('ok')>-1?'ok':'');
+  box.querySelector('span').textContent=c.indexOf('sync')>-1?'Sincronizando con la nube…':c.indexOf('ok')>-1?'Datos sincronizados con la nube':'Sin conexión con la nube · se usarán los datos guardados';
+}
+const st=document.getElementById('status');
+if(st)new MutationObserver(mirrorSync).observe(st,{attributes:true,childList:true,subtree:true});
+mirrorSync();
+
+function enter(){gate.hidden=true;document.body.style.overflow='';applyUser()}
+if(cur)enter();else{document.body.style.overflow='hidden';setTimeout(function(){document.getElementById('lgUser').focus()},50)}
+
+document.getElementById('lgForm').addEventListener('submit',function(e){
+  e.preventDefault();
+  const u=document.getElementById('lgUser').value.trim(),p=document.getElementById('lgPass').value.trim();
+  if(USERS[u]&&u===p){
+    cur=u;try{sessionStorage.setItem(KEY,u)}catch(x){}
+    document.getElementById('lgErr').textContent='';
+    enter();
+  }else{
+    document.getElementById('lgErr').textContent='Usuario o contraseña incorrectos';
+    const c=document.getElementById('lgCard');c.classList.remove('shake');void c.offsetWidth;c.classList.add('shake');
+    document.getElementById('lgPass').value='';
+  }
+});
+
+document.addEventListener('click',function(e){
+  if(e.target.closest&&e.target.closest('.avatar')&&cur&&confirm('¿Cerrar sesión de '+USERS[cur].name+'?')){
+    try{sessionStorage.removeItem(KEY)}catch(x){}
+    cur=null;document.getElementById('lgUser').value='';document.getElementById('lgPass').value='';
+    gate.hidden=false;document.body.style.overflow='hidden';document.getElementById('lgUser').focus();
+  }
+});
+})();
+</script>
 </body></html>
