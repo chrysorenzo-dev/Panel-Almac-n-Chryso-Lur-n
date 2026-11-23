@@ -1,3 +1,4 @@
+```html
 <!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Panel Almacén 1811</title>
@@ -224,6 +225,45 @@ td a,.link{color:var(--accent-soft);font-weight:600;background:none;border:0;pad
   position:relative;
 }
 .gap{width:var(--cs);height:var(--cs);background:#ffffff}
+.agrid{position:relative}
+.cell.multi{position:relative}
+.cell.multi::after{
+  content:"";
+  position:absolute;
+  top:2px;
+  right:2px;
+  width:6px;
+  height:6px;
+  border-radius:50%;
+  background:#dc2626;
+  border:1px solid #ffffff;
+  pointer-events:none;
+}
+.zona-band{
+  grid-column:33 / 44;
+  height:var(--cs);
+  background:#d0cece;
+  color:#111827;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:11px;
+  font-weight:800;
+  letter-spacing:.03em;
+  white-space:nowrap;
+  overflow:hidden;
+}
+.zona-box{
+  position:absolute;
+  left:calc(var(--cs) * 32);
+  top:var(--cs);
+  width:calc(var(--cs) * 11);
+  height:calc(var(--cs) * 6);
+  border:2px dashed #111827;
+  box-sizing:border-box;
+  pointer-events:none;
+  z-index:4;
+}
 
 .detail{position:static;width:100%;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:11px 14px}
 .detail-top{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 16px}
@@ -355,6 +395,8 @@ const CATS=[
  {k:'ubicaciones ganadas',n:'Ubicaciones ganadas',c:'#375623'}
 ];
 const CAT_BY_KEY={};CATS.forEach(c=>CAT_BY_KEY[c.k]=c);
+/* Categorías del plano que cuentan como ubicación LIBRE (no suman a la ocupación). Agrega aquí más claves si hace falta. */
+const CATS_LIBRES=['vacia','ubicaciones ganadas'];
 const LS_KEY='panel-almacen-1811.v1';
 const VALID_VIEWS=['resumen','mapa','movimientos'];
 
@@ -441,13 +483,18 @@ function parseWorkbook(wb,fileName){
     const iLote=h.lastIndexOf('lote');
     const iVen=h.findIndex(x=>x.includes('vencimiento'));
     const iCant=20;
-    rows.slice(1).forEach(r=>{const loc=str(r[0]);if(!loc)return;data.maestroTotal++;
+    const iObs=h.findIndex(x=>x==='obs');
+    rows.slice(1).forEach(r=>{const loc=str(r[0]).toUpperCase();if(!loc)return;data.maestroTotal++;
       const m=iMat>=0?str(r[iMat]):'';
-      if(m)data.maestro[loc]={
-        mat:m,
-        lote:iLote>=0?str(r[iLote]):'',
-        venc:iVen>=0?toISO(r[iVen]):'',
-        cant:r[iCant]!=null?num(r[iCant]):0
+      if(m){
+        /* Una ubicación puede tener varias líneas (saldos / ubicación compartida): se guardan todas */
+        (data.maestro[loc]||(data.maestro[loc]=[])).push({
+          mat:m,
+          lote:iLote>=0?str(r[iLote]):'',
+          venc:iVen>=0?toISO(r[iVen]):'',
+          cant:r[iCant]!=null?num(r[iCant]):0,
+          obs:iObs>=0?str(r[iObs]):''
+        });
       }});
   }else missing.push('maestro');
   data.missing=missing;
@@ -476,6 +523,13 @@ function prepare(){
   S.mov=Array.isArray(S.mov)?S.mov:[];
   S.mats=S.mats&&typeof S.mats==='object'?S.mats:{};
   S.maestro=S.maestro&&typeof S.maestro==='object'?S.maestro:{};
+  /* Compatibilidad: datos guardados antes tenían un solo objeto por ubicación; ahora es una lista */
+  Object.keys(S.maestro).forEach(k=>{
+    const v=S.maestro[k];
+    const arr=Array.isArray(v)?v:(v&&typeof v==='object'?[v]:[]);
+    if(arr.length)S.maestro[k]=arr;else delete S.maestro[k];
+  });
+  S.invLines=Object.keys(S.maestro).reduce((a,k)=>a+S.maestro[k].length,0);
   S.meta=S.meta&&typeof S.meta==='object'?S.meta:{file:'LAYOUT v3.0.xlsm',at:new Date().toISOString()};
   S.cellMap={};S.cells.forEach(c=>{if(Array.isArray(c)&&c[0])S.cellMap[c[0]]=c[1]});
   S.hasInv=Object.keys(S.maestro).length>0;
@@ -573,7 +627,11 @@ function resumenHTML(){
   const pal=S.mov.reduce((a,m)=>a+(m.pal||0),0);
   const period=S.dates.length?fmtDate(S.dates[0])+' al '+fmtDate(S.dates[S.dates.length-1]):'sin fechas';
   const invN=Object.keys(S.maestro).length;
-  const vac=cc.vacia||0;const ocu=total&&invN?(invN/total*100):null;
+  const vac=cc.vacia||0;
+  /* Ocupación = celdas pintadas en el layout, sin contar vacías ni ganadas (están libres) */
+  const ocupadas=S.cells.filter(c=>!CATS_LIBRES.includes(c[1])).length;
+  const libres=total-ocupadas;
+  const ocu=total?(ocupadas/total*100):null;
   const ic={cube:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10 12 4l9 6v10H3z"/><path d="M7 20v-6h10v6M7 17h10"/></svg>',
    pie:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12A9 9 0 1 1 12 3v9z"/><path d="M15 3.5A9 9 0 0 1 20.5 9H15z"/></svg>',
    arr:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4 3 8l4 4M3 8h14M17 12l4 4-4 4M21 16H7"/></svg>',
@@ -586,7 +644,7 @@ function resumenHTML(){
     <button class="btn ghost" data-view="movimientos"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4v16l13-8z"/></svg>Ver movimientos</button></div></section>
    <div class="kcards">
    ${kc('Total ubicaciones racks',nf.format(total),'↑ Cuadrícula BA a BJ activa','up',ic.cube,'blue')}
-   ${kc('Ocupación almacén',ocu==null?'—':nf1.format(ocu)+'%',ocu==null?'⚠ Pendiente de inventario':nf.format(invN)+' con material','wn',ic.pie,'amber')}
+   ${kc('Ocupación almacén',ocu==null?'—':nf1.format(ocu)+'%',ocu==null?'⚠ Sin ubicaciones en el plano':nf.format(ocupadas)+' ocupadas · '+nf.format(libres)+' libres','wn',ic.pie,'amber')}
    ${kc('Movimientos cargados',nf.format(t.ingreso+t.consumo+t.traspaso),'✓ '+nf.format(t.ingreso)+' ing · '+nf.format(t.consumo)+' cons · '+nf.format(t.traspaso)+' trasp','up',ic.arr,'green')}
    ${kc('Ubicaciones vacías',nf.format(vac),'● Según el plano del layout','vi',ic.box,'violet')}
    </div><p class="note" style="margin:-4px 0 16px">Ingresos ≈ ${pal?nf1.format(pal)+' pallets (estimado)':'sin dato de pallets'}.</p>`;
@@ -596,7 +654,7 @@ function resumenHTML(){
   h+=`<section class="card"><h2>Ubicaciones por categoría del plano</h2>${keys.map(k=>{const ci=catInfo(k);
     return `<button class="barrow" data-goto-cat="${esc(k)}" aria-label="${esc(ci.n)}: ${cc[k]} ubicaciones"><span class="nm"><span class="sw" style="background:${ci.c||'transparent'};border:1px solid var(--line-strong)"></span><span class="tx">${esc(ci.n)}</span></span>
     <span class="bar"><i style="width:${(cc[k]/max*100).toFixed(1)}%;background:${ci.c||'var(--line-strong)'}"></i></span><span class="n">${nf.format(cc[k])}</span></button>`}).join('')}
-    <p class="note" style="margin:10px 0 0">«Ubicación vacía» es lo que marca el plano. Cuando MAESTRO tenga el material por ubicación, el mapa también muestra la ocupación real.</p></section></div>`;
+    <p class="note" style="margin:10px 0 0">«Ubicación vacía» es lo que marca el plano. La ocupación del almacén cuenta las celdas pintadas del layout, sin sumar las vacías ni las «Ubicaciones ganadas» (están libres).</p></section></div>`;
   h+=`<div class="grid cols-2" style="margin-top:16px"><section class="card"><h2>Lotes por vencer</h2>${vencHTML()}</section>
    <section class="card"><h2>Materiales con más consumo</h2>${topHTML()}</section></div>`;
   return h;
@@ -618,7 +676,7 @@ function mini(type,label,cv){
    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${label} por día">${g}</svg></div>`;
 }
 function daysTo(iso){const a=new Date(iso+'T00:00:00');const n=new Date();n.setHours(0,0,0,0);return Math.round((a-n)/86400000)}
-function vencItems(){const out=[];Object.keys(S.maestro).forEach(loc=>{const x=S.maestro[loc];if(x.venc)out.push({loc,...x,d:daysTo(x.venc)})});return out.sort((a,b)=>a.d-b.d)}
+function vencItems(){const out=[];Object.keys(S.maestro).forEach(loc=>{S.maestro[loc].forEach(x=>{if(x.venc)out.push({loc,...x,d:daysTo(x.venc)})})});return out.sort((a,b)=>a.d-b.d)}
 function vencHTML(){
   const it=vencItems();
   if(!S.hasInv)return `<div class="empty">Todavía no hay material asignado a ubicaciones. Cuando llenes Código de material, Lote y Fecha de vencimiento en la hoja MAESTRO, aquí aparecen los lotes vencidos y los que vencen en 30, 60 y 90 días.</div>`;
@@ -648,7 +706,7 @@ function mapaHTML(){
    <label>Buscar ubicación o material<input type="search" id="mq" placeholder="BA.10.03, 661195, AMIDEA…" value="${esc(UI.map.q)}"></label>
    <label>Pasillo<select id="maisle"><option value="">Todos</option>${names.map(n=>`<option ${UI.map.aisle===n?'selected':''}>${n}</option>`).join('')}</select></label>
    <div><div class="note" style="font-size:11px;letter-spacing:.04em;text-transform:uppercase;margin-bottom:3px;font-weight:600">Colorear por</div>
-   <div class="seg"><button data-mode="cat" aria-pressed="${UI.map.mode==='cat'}">Categoría</button><button data-mode="occ" aria-pressed="${UI.map.mode==='occ'}" ${S.hasInv?'':'disabled title="Disponible cuando MAESTRO tenga código de material"'}>Ocupación</button></div></div></div>
+   <div class="seg"><button data-mode="cat" aria-pressed="${UI.map.mode==='cat'}">Categoría</button><button data-mode="occ" aria-pressed="${UI.map.mode==='occ'}" ${S.cells.length?'':'disabled title="Disponible cuando el plano tenga ubicaciones"'}>Ocupación</button></div></div></div>
    <div class="chipbox" style="margin-bottom:10px">${keys.map(k=>{const ci=catInfo(k);return `<button class="chip ${UI.map.cats.has(k)?'on':''}" data-cat="${esc(k)}"><span class="sw" style="background:${ci.c||'transparent'}"></span>${esc(ci.n)} · ${nf.format(cc[k])}</button>`}).join('')}</div>
    <div class="maplayout">
      <div class="card detail" id="detail">${detailHTML()}</div>
@@ -660,8 +718,9 @@ function matchSet(){
   const q=UI.map.q.trim();if(!q)return null;
   const set=new Set();const qn=norm(q);
   if(/^b[a-j]\.?\d/i.test(q)||/^b[a-j]$/i.test(q)){const p=q.toUpperCase();S.cells.forEach(c=>{if(c[0].startsWith(p))set.add(c[0])});return set}
-  Object.keys(S.maestro).forEach(loc=>{const x=S.maestro[loc];const nm=(S.mats[x.mat]||{}).nom||'';
-    if(x.mat===q.trim()||norm(nm).includes(qn)||norm(x.lote)===qn)set.add(loc)});
+  Object.keys(S.maestro).forEach(loc=>{
+    if(S.maestro[loc].some(x=>{const nm=(S.mats[x.mat]||{}).nom||'';
+      return x.mat===q.trim()||norm(nm).includes(qn)||norm(x.lote)===qn}))set.add(loc)});
   return set;
 }
 function mapInner(names,A){
@@ -670,29 +729,36 @@ function mapInner(names,A){
   return names.filter(n=>!UI.map.aisle||UI.map.aisle===n).map(p=>{
     const cols=AISLE_COLS[p]||S.maxCol;
     let cells='';for(let c=1;c<=cols;c++)cells+=`<div class="cn hd" style="grid-column:${c}">${c}</div>`;
+    const zonaIQBF=(p==='BA'&&cols>=43);
+    if(zonaIQBF){
+      for(let c=1;c<=32;c++)cells+=`<div class="gap"></div>`;
+      cells+=`<div class="zona-band">ZONA DE PRODUCTOS IQBF</div>`;
+    }
     for(let lv=5;lv>=1;lv--)for(let c=1;c<=cols;c++){
       const code=p+'.'+pad2(c)+'.'+pad2(lv);const cat=S.cellMap[code];
       if(cat==null){cells+=`<div class="gap"></div>`;continue}
-      const ci=catInfo(cat);const inv=S.maestro[code];
+      const ci=catInfo(cat);const items=S.maestro[code]||[];const ocupada=!CATS_LIBRES.includes(cat);
       let cls='cell';let st='';
+      if(items.length>1)cls+=' multi';
       if(lv===5)cls+=' top-lv';
       if(lv===1)cls+=' base-lv';
-      if(UI.map.mode==='occ'){if(inv)cls+=' occ'}
+      if(UI.map.mode==='occ'){if(ocupada)cls+=' occ'}
       else if(ci.c){cls+=' cat';st=`background:${ci.c}`}
       if(cats.size&&!cats.has(cat))cls+=' dim';
       if(ms){if(ms.has(code))cls+=' hit';else cls+=' dim'}
       if(UI.sel===code)cls+=' sel';
-      const tip=code+'\n'+ci.n+(inv?'\n'+inv.mat+' '+((S.mats[inv.mat]||{}).nom||'')+' (Cant: '+inv.cant+')':'');
+      const tip=code+'\n'+ci.n+(items.length>1?'\n'+items.length+' materiales en esta ubicación:':'')+
+        items.map(x=>'\n'+(items.length>1?'• ':'')+x.mat+' '+((S.mats[x.mat]||{}).nom||'')+' (Cant: '+x.cant+')').join('');
       cells+=`<button class="${cls}" style="${st}" data-code="${code}" data-tip="${esc(tip)}" aria-label="${esc(tip.replace(/\n/g,', '))}"></button>`;
     }
     const n=(A[p]||[]).filter(code=>+code.split('.')[1]<=cols).length;
     const aisleLabel=p.startsWith('B')&&p.length===2?p.slice(1):p;
-    return `<div class="aisle"><h3><span class="aisle-tag">${esc(aisleLabel)}</span> Pasillo ${p} <small>${nf.format(n)} ubicaciones</small></h3><div class="agrid" style="--cols:${cols}">${cells}</div></div>`}).join('');
+    return `<div class="aisle"><h3><span class="aisle-tag">${esc(aisleLabel)}</span> Pasillo ${p} <small>${nf.format(n)} ubicaciones</small></h3><div class="agrid" style="--cols:${cols}">${cells}${zonaIQBF?'<div class="zona-box" aria-hidden="true"></div>':''}</div></div>`}).join('');
 }
 function detailHTML(){
   const code=UI.sel;
   if(!code)return `<div class="detail-top"><div class="detail-head-left"><h2>Detalle de Ubicación</h2><span class="note">Haz clic en una celda del layout para ver su categoría, material, cantidad y vencimiento.</span></div></div>`;
-  const cat=S.cellMap[code];const ci=catInfo(cat);const inv=S.maestro[code];const p=code.split('.');
+  const cat=S.cellMap[code];const ci=catInfo(cat);const items=S.maestro[code]||[];const p=code.split('.');
   let h=`<div class="detail-top">
     <div class="detail-head-left">
       <div class="code">${code}</div>
@@ -706,12 +772,12 @@ function detailHTML(){
     </div>
     <span class="pill" style="border-color:${ci.c||'var(--line-strong)'}"><span class="sw" style="background:${ci.c||'transparent'};border:1px solid var(--line-strong)"></span>${esc(ci.n)}</span>
   </div>`;
-  if(inv){
+  if(items.length){items.forEach((inv,i)=>{
     const m=S.mats[inv.mat]||{};const d=inv.venc?daysTo(inv.venc):null;
     const vencBadge=inv.venc
       ? fmtDate(inv.venc)+' '+(d<0?'<span class="pill bad">vencido</span>':d<=30?`<span class="pill warn">${d} días</span>`:`<span class="pill ok">${d} días</span>`)
       : '—';
-    h+=`<div class="detail-mat-title">Material asignado</div>
+    h+=`<div class="detail-mat-title">${items.length===1?'Material asignado':(i===0?'Materiales asignados ('+items.length+') · 1 de '+items.length:'Material '+(i+1)+' de '+items.length)}</div>
     <dl class="mat-grid">
       <div><dt>Código</dt><dd class="mono">${esc(inv.mat)}</dd></div>
       <div><dt>Nombre</dt><dd>${esc(m.nom||'—')}</dd></div>
@@ -720,8 +786,9 @@ function detailHTML(){
       <div><dt>Cantidad (Col. U)</dt><dd class="mono" style="font-weight:600;color:var(--good)">${fmt(inv.cant)} ${esc(m.umb||'')}</dd></div>
       <div><dt>Vencimiento</dt><dd>${vencBadge}</dd></div>
       <div><dt>Por pallet</dt><dd>${m.cpal?fmt(m.cpal)+' '+esc(m.umb):'—'}</dd></div>
+      ${inv.obs?`<div><dt>Observación</dt><dd>${esc(inv.obs)}</dd></div>`:''}
     </dl>`;
-  }else{
+  });}else{
     h+=`<div class="empty" style="margin-top:8px">${S.hasInv?'Sin material asignado en MAESTRO.':'Aún no hay inventario: MAESTRO no tiene código de material para esta ubicación.'}</div>`;
   }
   return h;
@@ -900,3 +967,5 @@ document.addEventListener('click',function(e){
 })();
 </script>
 </body></html>
+
+```
