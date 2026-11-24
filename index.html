@@ -121,6 +121,7 @@ th{position:sticky;top:0;background:var(--surface-2);font-weight:600;font-size:1
 td.num,th.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
 td.desc{white-space:normal;min-width:220px;max-width:340px}
 tr:hover td{background:#f8fafc}
+tr.sel-row td,tr.sel-row:hover td{background:#f1f8e6}
 td a,.link{color:var(--accent-soft);font-weight:600;background:none;border:0;padding:0;text-decoration:underline;text-underline-offset:2px}
 
 .seg{display:inline-flex;border:1px solid var(--line-strong);border-radius:9px;overflow:hidden;background:var(--surface)}
@@ -303,7 +304,7 @@ html.authed #loginGate{display:none}
 #loginGate .lg-card{
   width:100%;
   max-width:400px;
-  background:rgba(255, 255, 255, 0.94);
+  background:#ffffff;
   backdrop-filter:blur(8px);
   -webkit-backdrop-filter:blur(8px);
   border:1px solid rgba(255, 255, 255, 0.75);
@@ -368,6 +369,9 @@ try{if(sessionStorage.getItem('almacen1811_session'))document.documentElement.cl
       <nav id="side" role="tablist" aria-label="Secciones">
         <button role="tab" data-view="resumen" aria-selected="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12A9 9 0 1 1 12 3v9z"></path><path d="M15 3.5A9 9 0 0 1 20.5 9H15z"></path></svg>Panel de Control</button>
         <button role="tab" data-view="mapa" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10 12 4l9 6v10H3z"></path><path d="M7 20v-6h10v6M7 17h10"></path></svg>Layout de Almacén</button>
+        <button role="tab" data-view="stock" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8l9 5 9-5z"></path><path d="M3 8v8l9 5 9-5V8M12 13v8"></path></svg>Stock por material</button>
+        <button role="tab" data-view="libres" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M12 8v8M8 12h8"></path></svg>Ubicaciones libres</button>
+        <button role="tab" data-view="analisis" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"></path></svg>Análisis de movimientos</button>
         <button role="tab" data-view="movimientos" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M3 10h18M3 15h18M9 4v16"></path></svg>Reporte de Movimiento (SAP)</button>
       </nav>
       <div class="sidefoot" id="sidefoot"><button class="btn ghost sm" id="btnsync">Actualizar desde nube</button><button class="btn ghost sm" id="btnload">Cargar otro Excel</button><button class="btn ghost sm" id="btnclear">Borrar datos</button></div>
@@ -429,7 +433,7 @@ const CATS=[
 const CAT_BY_KEY={};CATS.forEach(c=>CAT_BY_KEY[c.k]=c);
 const CATS_LIBRES=['vacia','ubicaciones ganadas'];
 const LS_KEY='panel-almacen-1811.v1';
-const VALID_VIEWS=['resumen','mapa','movimientos'];
+const VALID_VIEWS=['resumen','mapa','stock','libres','analisis','movimientos'];
 
 const $=s=>document.querySelector(s);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
@@ -471,10 +475,18 @@ function parseWorkbook(wb,fileName){
   ];
   defs.forEach(d=>{
     const ws=findSheet(wb,d.sheet);if(!ws){missing.push(d.sheet);return}
-    rowsOf(ws,12).slice(1).forEach(r=>{
-      const o={t:d.key};Object.keys(d.map).forEach(k=>o[k]=r[d.map[k]]);
+    const all=rowsOf(ws,14);let map=d.map;
+    if(d.key==='ingreso'){
+      /* INGRESO: se leen las columnas por el nombre del encabezado (incluye ORDEN DE COMPRA). Si el Excel es del formato anterior (sin esa columna) sigue funcionando. */
+      const h=(all[0]||[]).map(x=>norm(x));const hasOC=h.includes('orden de compra');const s=hasOC?1:0;
+      const eq=(k,fb)=>{const i=h.indexOf(k);return i>=0?i:fb};
+      map={doc:eq('documento material',0),oc:hasOC?eq('orden de compra',1):-1,mat:eq('material',1+s),guia:eq('n° guia',2+s),fecha:eq('fecha',3+s),
+        desc:eq('descripcion',4+s),lote:eq('lote',5+s),cant:eq('cant.',6+s),um:eq('um',7+s),venc:eq('fecha vencimiento',8+s),user:eq('user',9+s)};
+    }
+    all.slice(1).forEach(r=>{
+      const o={t:d.key};Object.keys(map).forEach(k=>o[k]=map[k]>=0?r[map[k]]:undefined);
       if(!d.need.some(k=>str(o[k])!==''))return;
-      data.mov.push({t:d.key,doc:str(o.doc),orden:str(o.orden),mat:str(o.mat),guia:str(o.guia),fecha:toISO(o.fecha),
+      data.mov.push({t:d.key,doc:str(o.doc),oc:str(o.oc),orden:str(o.orden),mat:str(o.mat),guia:str(o.guia),fecha:toISO(o.fecha),
         desc:str(o.desc),lote:str(o.lote),cant:num(o.cant),um:str(o.um),venc:toISO(o.venc),user:str(o.user),alm:str(o.alm),texto:str(o.texto)});
     });
   });
@@ -634,9 +646,15 @@ function render(){
   if(!S){m.innerHTML=dropHTML();return}
   if(UI.view==='resumen')m.innerHTML=resumenHTML();
   else if(UI.view==='mapa')m.innerHTML=mapaHTML();
+  else if(UI.view==='stock')m.innerHTML=stockPageHTML();
+  else if(UI.view==='libres')m.innerHTML=libresPageHTML();
+  else if(UI.view==='analisis')m.innerHTML=analisisPageHTML();
   else m.innerHTML=movHTML();
   if(UI.view==='mapa')bindMapa();
   if(UI.view==='movimientos')bindMov();
+  if(UI.view==='stock')bindStock();
+  if(UI.view==='libres'&&$('#lpas'))bindLibres();
+  if(UI.view==='analisis'&&$('#afrom'))bindAnalisis();
   if(location.hash!=='#'+UI.view){try{history.replaceState(null,'','#'+UI.view)}catch(e){}}
 }
 function dropHTML(){return `<div class="drop" id="drop"><div>
@@ -709,7 +727,7 @@ function vencHTML(){
   if(!S.hasInv)return `<div class="empty">Todavía no hay material asignado a ubicaciones. Cuando llenes Código de material, Lote y Fecha de vencimiento en la hoja MAESTRO, aquí aparecen los lotes vencidos y los que vencen en 30, 60 y 90 días.</div>`;
   if(!it.length)return `<div class="empty">Hay ${nf.format(Object.keys(S.maestro).length)} ubicaciones con material, pero ninguna tiene fecha de vencimiento en MAESTRO.</div>`;
   const b={v:0,a:0,b:0,c:0};it.forEach(x=>{if(x.d<0)b.v++;else if(x.d<=30)b.a++;else if(x.d<=60)b.b++;else if(x.d<=90)b.c++});
-  return `<div class="chipbox" style="margin-bottom:10px"><span class="chip"><span class="pill bad">Vencidos</span> ${b.v}</span><span class="chip">≤ 30 días ${b.a}</span><span class="chip">≤ 60 días ${b.b}</span><span class="chip">≤ 90 días ${b.c}</span></div>
+  return `<div class="chipbox" style="margin-bottom:10px"><span class="chip"><span class="pill bad">Vencidos</span> ${b.v}</span><span class="chip">≤ 30 días ${b.a}</span><span class="chip">≤ 60 días ${b.b}</span><span class="chip">≤ 90 días ${b.c}</span><button class="btn ghost sm" data-exp="venc" style="margin-left:auto">Descargar Excel</button></div>
    <div class="tablewrap" style="max-height:300px"><table><thead><tr><th>Ubicación</th><th>Material</th><th>Lote</th><th class="num">Cantidad</th><th>Vence</th><th class="num">Días</th></tr></thead><tbody>
    ${it.slice(0,15).map(x=>{
      const m=S.mats[x.mat]||{};
@@ -827,7 +845,7 @@ function bindMapa(){
 }
 
 const COLS={
- ingreso:[['fecha','Fecha',m=>fmtDate(m.fecha),'',m=>m.fecha],['doc','Doc. material',m=>m.doc,'mono'],['mat','Material',m=>m.mat,'mono mat'],['desc','Descripción',m=>m.desc,'desc'],['tipo','Tipo',m=>m.tipo],['guia','Guía',m=>m.guia],['lote','Lote',m=>m.lote,'mono'],['cant','Cant.',m=>fmt(m.cant),'num',m=>m.cant],['um','UM',m=>m.um],['pal','Pallets ≈',m=>m.pal==null?'—':nf1.format(m.pal),'num',m=>m.pal==null?-1:m.pal],['venc','Vence',m=>fmtDate(m.venc),'',m=>m.venc],['user','Usuario',m=>m.user]],
+ ingreso:[['fecha','Fecha',m=>fmtDate(m.fecha),'',m=>m.fecha],['doc','Doc. material',m=>m.doc,'mono'],['oc','Orden de compra',m=>m.oc||'','mono'],['mat','Material',m=>m.mat,'mono mat'],['desc','Descripción',m=>m.desc,'desc'],['tipo','Tipo',m=>m.tipo],['guia','Guía',m=>m.guia],['lote','Lote',m=>m.lote,'mono'],['cant','Cant.',m=>fmt(m.cant),'num',m=>m.cant],['um','UM',m=>m.um],['pal','Pallets ≈',m=>m.pal==null?'—':nf1.format(m.pal),'num',m=>m.pal==null?-1:m.pal],['venc','Vence',m=>fmtDate(m.venc),'',m=>m.venc],['user','Usuario',m=>m.user]],
  consumo:[['fecha','Fecha',m=>fmtDate(m.fecha),'',m=>m.fecha],['orden','Orden',m=>m.orden,'mono'],['doc','Doc. material',m=>m.doc,'mono'],['mat','Material',m=>m.mat,'mono mat'],['desc','Descripción',m=>m.desc,'desc'],['tipo','Tipo',m=>m.tipo],['lote','Lote',m=>m.lote,'mono'],['cant','Cant. consumida',m=>fmt(Math.abs(m.cant)),'num',m=>Math.abs(m.cant)],['um','UM',m=>m.um],['user','Usuario',m=>m.user]],
  traspaso:[['fecha','Fecha',m=>fmtDate(m.fecha),'',m=>m.fecha],['mat','Material',m=>m.mat,'mono mat'],['desc','Descripción',m=>m.desc,'desc'],['tipo','Tipo',m=>m.tipo],['alm','Almacén',m=>m.alm],['texto','Texto',m=>m.texto],['lote','Lote',m=>m.lote,'mono'],['cant','Cant.',m=>fmt(m.cant),'num',m=>m.cant],['um','UM',m=>m.um],['user','Usuario',m=>m.user]]
 };
@@ -837,7 +855,7 @@ function filtered(){
   const f=UI.f;const q=norm(f.q);
   return S.mov.filter(m=>m.t===UI.tab&&(!f.from||m.fecha>=f.from)&&(!f.to||m.fecha<=f.to)&&(!f.user||m.user===f.user)&&
     (!f.um||(f.um==='__EMPTY__'?!str(m.um):m.um===f.um))&&
-    (!q||norm([m.mat,m.desc,m.lote,m.guia,m.doc,m.orden,m.texto].join(' ')).includes(q)));
+    (!q||norm([m.mat,m.desc,m.lote,m.guia,m.doc,m.oc,m.orden,m.texto].join(' ')).includes(q)));
 }
 function sorted(rows){
   const col=COLS[UI.tab].find(c=>c[0]===UI.sort.k)||COLS[UI.tab][0];const key=col[4]||(m=>String(col[2](m)).toLowerCase());
@@ -857,10 +875,10 @@ function movHTML(){
   <div class="filters" style="margin-top:14px">
    <label>Desde<input type="date" id="ffrom" value="${UI.f.from}"></label>
    <label>Hasta<input type="date" id="fto" value="${UI.f.to}"></label>
-   <label>Buscar<input type="search" id="fq" placeholder="material, descripción, lote, guía…" value="${esc(UI.f.q)}"></label>
+   <label>Buscar<input type="search" id="fq" placeholder="material, descripción, lote, guía, orden de compra…" value="${esc(UI.f.q)}"></label>
    <label>Usuario<select id="fuser"><option value="">Todos</option>${S.users.map(u=>`<option ${UI.f.user===u?'selected':''}>${esc(u)}</option>`).join('')}</select></label>
    <label>UM<select id="fum"><option value="">Todas</option>${tabUms.map(u=>`<option value="${esc(u)}" ${UI.f.um===u?'selected':''}>${esc(u)}</option>`).join('')}${hasEmptyUm?`<option value="__EMPTY__" ${UI.f.um==='__EMPTY__'?'selected':''}>Sin UM</option>`:''}</select></label>
-   <button class="btn ghost sm" id="fclear">Limpiar filtros</button><button class="btn sm" id="fcopy">Copiar tabla</button>
+   <button class="btn ghost sm" id="fclear">Limpiar filtros</button><button class="btn sm" id="fcopy">Copiar tabla</button><button class="btn sm" data-exp="mov">Descargar Excel</button>
   </div>
   <div class="chipbox" style="margin-bottom:10px"><span class="chip"><b class="mono">${nf.format(rows.length)}</b> líneas</span>
    ${ums.slice(0,4).map(u=>`<span class="chip"><b class="mono">${fmt(um[u])}</b> ${esc(u||'s/UM')}</span>`).join('')}${ums.length>4?`<span class="chip">+${ums.length-4} UM</span>`:''}
@@ -882,6 +900,277 @@ function bindMov(){
   $('#fcopy').addEventListener('click',copyTable);
   const mo=$('#fmore');if(mo)mo.addEventListener('click',()=>{UI.limit+=500;render()});
 }
+/* ================= NUEVOS SEGMENTOS: Stock por material · Ubicaciones libres · Análisis de movimientos · Exportar a Excel ================= */
+UI.stock={q:'',sel:''};
+UI.a={from:'',to:'',tipo:'consumo'};
+UI.lib={aisle:'',lv:'',kind:'',limit:300,conf:false};
+
+const MESES=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+function monthLabel(k){const p=k.split('-');return MESES[+p[1]-1]+' '+p[0].slice(2)}
+function niceMax(v){const p=Math.pow(10,Math.floor(Math.log10(v)));const f=v/p;return (f<=1?1:f<=2?2:f<=5?5:10)*p}
+const vacio=msg=>`<div class="empty">${msg}</div>`;
+function dayPill(d){
+  if(d==null)return '—';
+  if(d<0)return `<span class="pill bad">Vencido · ${nf.format(-d)} d</span>`;
+  if(d<=30)return `<span class="pill bad">${nf.format(d)} d</span>`;
+  if(d<=90)return `<span class="pill warn">${nf.format(d)} d</span>`;
+  return `<span class="pill ok">${nf.format(d)} d</span>`;
+}
+function kcardSimple(l,v,s,sc){return `<div class="kcard"><div><div class="l">${l}</div><div class="v">${v}</div><div class="s ${sc||'up'}">${s}</div></div></div>`}
+
+/* ---------- Exportar a Excel (si no carga la librería, descarga CSV) ---------- */
+function downloadBlob(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1000)}
+function stampName(base){const d=new Date();const p=n=>String(n).padStart(2,'0');return base+'_'+d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())}
+function exportRows(base,sheets){
+  const clean=sheets.filter(s=>s.rows&&s.rows.length);
+  if(!clean.length){alert('No hay datos para exportar con los filtros actuales.');return}
+  if(typeof XLSX!=='undefined'){
+    try{
+      const wb=XLSX.utils.book_new();
+      clean.forEach(s=>{
+        const ws=XLSX.utils.json_to_sheet(s.rows);
+        ws['!cols']=Object.keys(s.rows[0]).map(k=>({wch:Math.min(42,Math.max(k.length+2,...s.rows.slice(0,200).map(r=>String(r[k]==null?'':r[k]).length+2)))}));
+        XLSX.utils.book_append_sheet(wb,ws,s.name.slice(0,31));
+      });
+      XLSX.writeFile(wb,stampName(base)+'.xlsx');return;
+    }catch(e){console.warn('No se pudo generar el Excel; se descarga CSV',e)}
+  }
+  const s=clean[0];const cols=Object.keys(s.rows[0]);const q=v=>'"'+String(v==null?'':v).replace(/"/g,'""')+'"';
+  const csv='﻿'+[cols.map(q).join(',')].concat(s.rows.map(r=>cols.map(c=>q(r[c])).join(','))).join('\r\n');
+  downloadBlob(new Blob([csv],{type:'text/csv;charset=utf-8'}),stampName(base)+'.csv');
+}
+
+/* ---------- STOCK POR MATERIAL ---------- */
+function stockByMat(){
+  const g={};
+  Object.keys(S.maestro).forEach(loc=>S.maestro[loc].forEach(x=>{
+    const o=g[x.mat]||(g[x.mat]={mat:x.mat,locs:new Set(),lotes:new Set(),q:0,lines:[],minD:null,venc:''});
+    o.locs.add(loc);if(x.lote)o.lotes.add(x.lote);o.q+=x.cant||0;o.lines.push({loc,...x});
+    if(x.venc){const d=daysTo(x.venc);if(o.minD==null||d<o.minD){o.minD=d;o.venc=x.venc}}
+  }));
+  return Object.values(g);
+}
+const matNom=k=>(S.mats[k]||{}).nom||'';
+function stockExportSheets(){
+  const lines=[];Object.keys(S.maestro).sort().forEach(loc=>S.maestro[loc].forEach(x=>{const m=S.mats[x.mat]||{};
+    lines.push({'Ubicación':loc,'Código material':x.mat,'Nombre':m.nom||'','Tipo':m.tipo||'','Lote':x.lote,'Cantidad':x.cant,'UM':m.umb||'','Vence':x.venc?fmtDate(x.venc):'','Días para vencer':x.venc?daysTo(x.venc):'','Observación':x.obs||''})}));
+  const mats=stockByMat().sort((a,b)=>(matNom(a.mat)||a.mat).localeCompare(matNom(b.mat)||b.mat,'es')).map(o=>{const m=S.mats[o.mat]||{};
+    return {'Código material':o.mat,'Nombre':m.nom||'','Tipo':m.tipo||'','UM':m.umb||'','Cantidad total':o.q,'Ubicaciones':o.locs.size,'Lotes':o.lotes.size,'Próximo vencimiento':o.venc?fmtDate(o.venc):'','Días para vencer':o.minD==null?'':o.minD}});
+  return [{name:'Stock por material',rows:mats},{name:'Inventario por ubicación',rows:lines}];
+}
+function stockDetailHTML(o){
+  const m=S.mats[o.mat]||{};
+  const cnt={ingreso:0,consumo:0,traspaso:0},last={};let cons=0;
+  S.mov.forEach(x=>{if(x.mat!==o.mat)return;cnt[x.t]++;if(x.fecha&&(!last[x.t]||x.fecha>last[x.t]))last[x.t]=x.fecha;if(x.t==='consumo')cons+=Math.abs(x.cant)});
+  const lines=o.lines.slice().sort((a,b)=>(a.venc||'9999').localeCompare(b.venc||'9999')||a.loc.localeCompare(b.loc));
+  const lastTxt=t=>last[t]?' · último '+fmtDate(last[t]):'';
+  return `<section class="card" style="margin-bottom:14px">
+   <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap"><h2 style="margin:0 0 10px">${esc(o.mat)} · ${esc(m.nom||'Sin nombre en Verificación')}</h2><button class="btn ghost sm" data-stock-mat="">Cerrar detalle</button></div>
+   <div class="chipbox" style="margin-bottom:10px">
+    <span class="chip"><b class="mono">${fmt(o.q)}</b> ${esc(m.umb||'')} en total</span>
+    <span class="chip"><b class="mono">${nf.format(o.locs.size)}</b> ubicaciones</span>
+    <span class="chip"><b class="mono">${nf.format(o.lotes.size)}</b> lotes</span>
+    ${m.tipo?`<span class="chip">${esc(m.tipo)}</span>`:''}
+    ${m.cpal?`<span class="chip">${fmt(m.cpal)} ${esc(m.umb||'')} por pallet</span>`:''}
+    ${o.minD!=null?`<span class="chip">Vence antes: ${fmtDate(o.venc)} ${dayPill(o.minD)}</span>`:''}</div>
+   <div class="tablewrap" style="max-height:300px"><table><thead><tr><th>Ubicación</th><th>Lote</th><th class="num">Cantidad</th><th>Vence</th><th>Días</th><th>Observación</th></tr></thead><tbody>
+   ${lines.map(x=>`<tr><td><button class="link mono" data-goto-loc="${esc(x.loc)}">${esc(x.loc)}</button></td><td class="mono">${esc(x.lote)}</td><td class="num">${fmt(x.cant)} ${esc(m.umb||'')}</td><td>${fmtDate(x.venc)}</td><td>${x.venc?dayPill(daysTo(x.venc)):'—'}</td><td>${esc(x.obs||'')}</td></tr>`).join('')}</tbody></table></div>
+   <p class="note" style="margin:10px 0 0">Movimientos cargados: ${nf.format(cnt.ingreso)} ingresos${lastTxt('ingreso')} · ${nf.format(cnt.consumo)} consumos${lastTxt('consumo')} (${fmt(cons)} ${esc(m.umb||'')} consumidos) · ${nf.format(cnt.traspaso)} traspasos${lastTxt('traspaso')}.
+   ${cnt.consumo?`<button class="link" data-goto-mat="${esc(o.mat)}">Ver sus consumos</button>`:''}</p></section>`;
+}
+function stockPageHTML(){
+  if(!S.hasInv)return vacio('Todavía no hay material asignado a ubicaciones. Cuando llenes «Código de material» en la hoja MAESTRO, aquí podrás consultar el stock por material.');
+  const all=stockByMat();const q=norm(UI.stock.q);
+  const list=all.filter(o=>!q||norm(o.mat+' '+matNom(o.mat)+' '+((S.mats[o.mat]||{}).tipo||'')+' '+[...o.lotes].join(' ')).includes(q))
+    .sort((a,b)=>(matNom(a.mat)||a.mat).localeCompare(matNom(b.mat)||b.mat,'es'));
+  const sel=all.find(o=>o.mat===UI.stock.sel);
+  return `<div class="filters"><label>Buscar material<input type="search" id="sq" placeholder="código, nombre, tipo o lote…" value="${esc(UI.stock.q)}"></label>
+    <button class="btn ghost sm" id="sclear">Limpiar</button><button class="btn sm" data-exp="stock">Descargar Excel</button></div>
+   <div class="chipbox" style="margin-bottom:12px"><span class="chip"><b class="mono">${nf.format(all.length)}</b> materiales con stock</span>
+    <span class="chip"><b class="mono">${nf.format(Object.keys(S.maestro).length)}</b> ubicaciones con material</span>
+    <span class="chip"><b class="mono">${nf.format(S.invLines)}</b> líneas en MAESTRO</span>
+    ${q?`<span class="chip"><b class="mono">${nf.format(list.length)}</b> coinciden</span>`:''}</div>
+   ${sel?stockDetailHTML(sel):''}
+   ${list.length?`<div class="tablewrap"><table><thead><tr><th>Material</th><th>Nombre</th><th>Tipo</th><th class="num">Cantidad total</th><th class="num">Ubicaciones</th><th class="num">Lotes</th><th>Próx. vencimiento</th></tr></thead><tbody>
+    ${list.map(o=>{const m=S.mats[o.mat]||{};return `<tr class="${o.mat===UI.stock.sel?'sel-row':''}"><td><button class="link mono" data-stock-mat="${esc(o.mat)}">${esc(o.mat)}</button></td><td class="desc">${esc(m.nom||'')}</td><td>${esc(m.tipo||'')}</td><td class="num">${fmt(o.q)} ${esc(m.umb||'')}</td><td class="num">${nf.format(o.locs.size)}</td><td class="num">${nf.format(o.lotes.size)}</td><td>${o.minD==null?'—':fmtDate(o.venc)+' '+dayPill(o.minD)}</td></tr>`}).join('')}</tbody></table></div>`
+    :vacio('Ningún material coincide con la búsqueda.')}
+   <p class="note" style="margin-top:10px">Haz clic en un código para ver en qué ubicaciones y lotes está. La cantidad total suma todas las líneas de ese material en MAESTRO.</p>`;
+}
+function bindStock(){
+  let t;const i=$('#sq');if(!i)return;
+  i.addEventListener('input',e=>{UI.stock.q=e.target.value;clearTimeout(t);t=setTimeout(()=>{const pos=e.target.selectionStart;render();const n=$('#sq');n.focus();n.setSelectionRange(pos,pos)},250)});
+  $('#sclear').addEventListener('click',()=>{UI.stock.q='';UI.stock.sel='';render()});
+}
+
+/* ---------- UBICACIONES LIBRES POR PASILLO ---------- */
+function libresRows(){return S.cells.map(c=>{const p=c[0].split('.');return {code:c[0],cat:c[1],pas:p[0],col:+p[1],lv:+p[2],libre:CATS_LIBRES.includes(c[1])}})}
+function libresData(){
+  const all=libresRows();const pas=[...new Set(all.map(r=>r.pas))].sort();
+  const by={};pas.forEach(p=>by[p]={t:0,l:0,lv:[0,0,0,0,0,0]});
+  all.forEach(r=>{const o=by[r.pas];o.t++;if(r.libre){o.l++;if(r.lv>=1&&r.lv<=5)o.lv[r.lv]++}});
+  const f=UI.lib;
+  const list=all.filter(r=>r.libre&&(!f.aisle||r.pas===f.aisle)&&(!f.lv||r.lv===+f.lv)&&(!f.kind||r.cat===f.kind))
+    .sort((a,b)=>a.pas.localeCompare(b.pas)||a.col-b.col||a.lv-b.lv);
+  /* Conflictos: el plano la marca libre, pero MAESTRO le asigna material (no depende de los filtros) */
+  const conf=all.filter(r=>r.libre&&S.maestro[r.code]).sort((a,b)=>a.pas.localeCompare(b.pas)||a.col-b.col||a.lv-b.lv);
+  return {all,pas,by,list,conf};
+}
+function confRows(d){
+  const out=[];
+  d.conf.forEach(r=>S.maestro[r.code].forEach(x=>{const m=S.mats[x.mat]||{};
+    out.push({code:r.code,plano:catInfo(r.cat).n,mat:x.mat,nom:m.nom||'',lote:x.lote,cant:x.cant,umb:m.umb||'',venc:x.venc,obs:x.obs||''})}));
+  return out;
+}
+const CONF_ACCION='Pinta la celda en el LAYOUT con la categoría del material (ej. Materia Prima) o, si ya no hay material, borra esa línea en MAESTRO. Luego pulsa «Actualizar desde nube».';
+function libresExportSheets(){
+  const d=libresData();
+  return [{name:'Ubicaciones libres',rows:d.list.map(r=>({'Ubicación':r.code,'Pasillo':r.pas,'Columna':r.col,'Nivel':r.lv,'Tipo':catInfo(r.cat).n,'Aviso':S.maestro[r.code]?'Tiene material en MAESTRO':''}))},
+    {name:'Resumen por pasillo',rows:d.pas.map(p=>{const o=d.by[p];return {'Pasillo':p,'Total':o.t,'Ocupadas':o.t-o.l,'Libres':o.l,'% ocupación':o.t?+((o.t-o.l)/o.t*100).toFixed(1):0,'Libres N1':o.lv[1],'Libres N2':o.lv[2],'Libres N3':o.lv[3],'Libres N4':o.lv[4],'Libres N5':o.lv[5]}})}];
+}
+function libresPageHTML(){
+  const d=libresData();
+  if(!d.all.length)return vacio('El plano todavía no tiene ubicaciones cargadas.');
+  const f=UI.lib;const tot=d.pas.reduce((a,p)=>({t:a.t+d.by[p].t,l:a.l+d.by[p].l,lv:a.lv.map((v,i)=>v+d.by[p].lv[i])}),{t:0,l:0,lv:[0,0,0,0,0,0]});
+  const conMat=d.conf.length;const cr=confRows(d);
+  const kinds=CATS_LIBRES.filter(k=>d.all.some(r=>r.cat===k));
+  const pc=(l,t)=>t?nf1.format((t-l)/t*100)+'%':'—';
+  return `<div class="kcards">
+    ${kcardSimple('Ubicaciones libres',nf.format(tot.l),'de '+nf.format(tot.t)+' en el plano','up')}
+    ${kcardSimple('Ocupación',pc(tot.l,tot.t),nf.format(tot.t-tot.l)+' ocupadas','wn')}
+    ${kcardSimple('Libres en la lista',nf.format(d.list.length),(f.aisle||f.lv||f.kind)?'con los filtros aplicados':'sin filtros','vi')}</div>
+   <section class="card" style="margin-bottom:16px"><h2>Libres por pasillo y nivel</h2>
+    <div class="tablewrap" style="max-height:none"><table><thead><tr><th>Pasillo</th><th class="num">Total</th><th class="num">Ocupadas</th><th class="num">Libres</th><th class="num">% ocupación</th><th class="num">Libres N1</th><th class="num">N2</th><th class="num">N3</th><th class="num">N4</th><th class="num">N5</th></tr></thead><tbody>
+    ${d.pas.map(p=>{const o=d.by[p];return `<tr class="${f.aisle===p?'sel-row':''}"><td><button class="link mono" data-libaisle="${esc(p)}">${esc(p)}</button></td><td class="num">${nf.format(o.t)}</td><td class="num">${nf.format(o.t-o.l)}</td><td class="num" style="font-weight:700;color:var(--good)">${nf.format(o.l)}</td><td class="num">${pc(o.l,o.t)}</td>${[1,2,3,4,5].map(n=>`<td class="num">${nf.format(o.lv[n])}</td>`).join('')}</tr>`}).join('')}
+    <tr><td><b>Total</b></td><td class="num"><b>${nf.format(tot.t)}</b></td><td class="num"><b>${nf.format(tot.t-tot.l)}</b></td><td class="num"><b>${nf.format(tot.l)}</b></td><td class="num"><b>${pc(tot.l,tot.t)}</b></td>${[1,2,3,4,5].map(n=>`<td class="num"><b>${nf.format(tot.lv[n])}</b></td>`).join('')}</tr></tbody></table></div>
+    <p class="note" style="margin:10px 0 0">Libre = celda del plano marcada como «Ubicación vacía» o «Ubicaciones ganadas». Haz clic en un pasillo para filtrar la lista de abajo.</p></section>
+   <div class="filters"><label>Pasillo<select id="lpas"><option value="">Todos</option>${d.pas.map(p=>`<option ${f.aisle===p?'selected':''}>${esc(p)}</option>`).join('')}</select></label>
+    <label>Nivel<select id="llv"><option value="">Todos</option>${[1,2,3,4,5].map(n=>`<option value="${n}" ${+f.lv===n?'selected':''}>Nivel ${n}</option>`).join('')}</select></label>
+    <label>Tipo<select id="lkind"><option value="">Todas</option>${kinds.map(k=>`<option value="${esc(k)}" ${f.kind===k?'selected':''}>${esc(catInfo(k).n)}</option>`).join('')}</select></label>
+    <button class="btn ghost sm" id="lclear">Limpiar filtros</button><button class="btn sm" data-exp="libres">Descargar Excel</button></div>
+   ${conMat?`<div class="card" style="margin:0 0 12px;border-color:var(--warn)">
+     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:space-between">
+      <span style="color:var(--warn);font-weight:600">⚠ ${nf.format(conMat)} ${conMat===1?'ubicación figura libre':'ubicaciones figuran libres'} en el plano pero ${conMat===1?'tiene':'tienen'} material en MAESTRO. Conviene revisar${conMat===1?'la':'las'} antes de usar${conMat===1?'la':'las'}.</span>
+      <button class="btn ghost sm" data-libconf="1">${f.conf?'Ocultar detalle':'Ver detalle'}</button></div>
+     ${f.conf?`<div class="tablewrap" style="max-height:300px;margin-top:12px"><table><thead><tr><th>Ubicación</th><th>En el plano</th><th>Material en MAESTRO</th><th>Lote</th><th class="num">Cantidad</th><th>Vence</th></tr></thead><tbody>
+      ${cr.map(r=>`<tr><td><button class="link mono" data-goto-loc="${esc(r.code)}">${esc(r.code)}</button></td><td>${esc(r.plano)}</td><td class="desc"><button class="link mono" data-stock-mat="${esc(r.mat)}" data-gostock="1">${esc(r.mat)}</button> ${esc(r.nom)}</td><td class="mono">${esc(r.lote)}</td><td class="num">${fmt(r.cant)} ${esc(r.umb)}</td><td>${fmtDate(r.venc)}</td></tr>`).join('')}</tbody></table></div>
+      <p class="note" style="margin:10px 0 8px"><b>Qué hacer:</b> ${esc(CONF_ACCION)} Esta página solo lee tu Excel, por eso la corrección se hace allí.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn ghost sm" id="confcopy">Copiar lista</button><button class="btn sm" data-exp="libconf">Descargar Excel</button></div>`:''}</div>`:''}
+   ${d.list.length?`<div class="tablewrap"><table><thead><tr><th>Ubicación</th><th>Pasillo</th><th class="num">Columna</th><th class="num">Nivel</th><th>Tipo</th><th>Aviso</th></tr></thead><tbody>
+    ${d.list.slice(0,f.limit).map(r=>`<tr><td><button class="link mono" data-goto-loc="${esc(r.code)}">${esc(r.code)}</button></td><td>${esc(r.pas)}</td><td class="num">${r.col}</td><td class="num">${r.lv}</td><td>${esc(catInfo(r.cat).n)}</td><td>${S.maestro[r.code]?'<span class="pill warn">Tiene material en MAESTRO</span>':''}</td></tr>`).join('')}</tbody></table></div>
+    ${d.list.length>f.limit?`<p class="note">Mostrando ${nf.format(f.limit)} de ${nf.format(d.list.length)}. <button class="link" id="lmore">Mostrar más</button></p>`:''}`
+    :vacio('No hay ubicaciones libres con esos filtros.')}`;
+}
+function bindLibres(){
+  const upd=()=>{UI.lib.limit=300;render()};
+  $('#lpas').addEventListener('change',e=>{UI.lib.aisle=e.target.value;upd()});
+  $('#llv').addEventListener('change',e=>{UI.lib.lv=e.target.value;upd()});
+  $('#lkind').addEventListener('change',e=>{UI.lib.kind=e.target.value;upd()});
+  $('#lclear').addEventListener('click',()=>{UI.lib={aisle:'',lv:'',kind:'',limit:300,conf:UI.lib.conf};render()});
+  const cc=$('#confcopy');if(cc)cc.addEventListener('click',()=>{
+    const rows=confRows(libresData());
+    const tsv=['Ubicación\tEn el plano\tMaterial\tNombre\tLote\tCantidad\tVence\tQué hacer'].concat(rows.map(r=>[r.code,r.plano,r.mat,r.nom,r.lote,r.cant+' '+r.umb,r.venc?fmtDate(r.venc):'',CONF_ACCION].join('\t'))).join('\n');
+    const done=ok=>{const o=cc.textContent;cc.textContent=ok?'Copiado: pégalo en Excel':'No se pudo copiar';setTimeout(()=>{cc.textContent=o},2200)};
+    try{navigator.clipboard.writeText(tsv).then(()=>done(true),()=>fallbackCopy(tsv,done))}catch(e){fallbackCopy(tsv,done)}
+  });
+  const mo=$('#lmore');if(mo)mo.addEventListener('click',()=>{UI.lib.limit+=500;render()});
+}
+
+/* ---------- ANÁLISIS DE MOVIMIENTOS ---------- */
+function analisisData(){
+  const a=UI.a;
+  const rows=S.mov.filter(m=>(!a.from||m.fecha>=a.from)&&(!a.to||m.fecha<=a.to));
+  const t={ingreso:0,consumo:0,traspaso:0};rows.forEach(m=>t[m.t]++);
+  const days=new Set(rows.map(m=>m.fecha).filter(Boolean));
+  const mm={};rows.forEach(m=>{if(!m.fecha)return;const k=m.fecha.slice(0,7);(mm[k]||(mm[k]={ingreso:0,consumo:0,traspaso:0}))[m.t]++});
+  let keys=Object.keys(mm).sort();
+  if(keys.length){const out=[];let [y,mo]=keys[0].split('-').map(Number);const [y2,m2]=keys[keys.length-1].split('-').map(Number);
+    while(y<y2||(y===y2&&mo<=m2)){const k=y+'-'+String(mo).padStart(2,'0');out.push(k);if(!mm[k])mm[k]={ingreso:0,consumo:0,traspaso:0};mo++;if(mo>12){mo=1;y++}}
+    keys=out}
+  const g={};rows.filter(m=>m.t===a.tipo).forEach(m=>{const k=m.mat+'|'+m.um;
+    const o=g[k]||(g[k]={mat:m.mat,um:m.um,desc:m.desc||matNom(m.mat),n:0,q:0,last:'',days:new Set()});
+    o.n++;o.q+=Math.abs(m.cant);if(m.fecha){o.days.add(m.fecha);if(m.fecha>o.last)o.last=m.fecha}});
+  const top=Object.values(g).sort((x,y)=>y.n-x.n||y.q-x.q);
+  const us={};rows.forEach(m=>{const u=m.user||'(sin usuario)';const o=us[u]||(us[u]={user:u,ingreso:0,consumo:0,traspaso:0,n:0});o[m.t]++;o.n++});
+  const users=Object.values(us).sort((x,y)=>y.n-x.n);
+  let sinCons=[];
+  if(S.hasInv){
+    const consMats=new Set(rows.filter(m=>m.t==='consumo').map(m=>m.mat));
+    const lastC={};S.mov.forEach(m=>{if(m.t==='consumo'&&m.fecha&&(!lastC[m.mat]||m.fecha>lastC[m.mat]))lastC[m.mat]=m.fecha});
+    sinCons=stockByMat().filter(o=>!consMats.has(o.mat)).sort((x,y)=>y.locs.size-x.locs.size||y.q-x.q).map(o=>({...o,last:lastC[o.mat]||''}));
+  }
+  return {rows,t,days,keys,mm,top,users,sinCons};
+}
+function monthlyChart(d){
+  if(!d.keys.length)return vacio('Sin fechas de movimiento en el período.');
+  const W=1100,H=250,L=44,B=28,T=8,R=6,iw=W-L-R,ih=H-T-B;
+  const mx=Math.max(1,...d.keys.map(k=>Math.max(d.mm[k].ingreso,d.mm[k].consumo,d.mm[k].traspaso)));const top=niceMax(mx);
+  const gw=iw/d.keys.length;const bw=Math.max(3,Math.min(28,gw*.26));
+  const ser=[['ingreso','Ingresos','--s-ingreso'],['consumo','Consumos','--s-consumo'],['traspaso','Traspasos','--s-traspaso']];
+  let g='';[0,top/2,top].forEach(v=>{const y=T+ih-ih*v/top;g+=`<line x1="${L}" x2="${W-R}" y1="${y}" y2="${y}" stroke="var(--line)" stroke-width="1"/><text x="${L-6}" y="${y+3}" text-anchor="end">${nf.format(v)}</text>`});
+  d.keys.forEach((k,i)=>{
+    const x0=L+gw*i+(gw-bw*3-4)/2;
+    ser.forEach((s,j)=>{const v=d.mm[k][s[0]];const hh=ih*v/top;
+      g+=`<rect x="${x0+j*(bw+2)}" y="${T+ih-hh}" width="${bw}" height="${hh}" rx="2" fill="var(${s[2]})" data-tip="${monthLabel(k)}\n${s[1]}: ${nf.format(v)} líneas"/>`});
+    if(d.keys.length<=14||i%Math.ceil(d.keys.length/12)===0)g+=`<text x="${L+gw*i+gw/2}" y="${H-8}" text-anchor="middle">${monthLabel(k)}</text>`;
+  });
+  return `<div class="chipbox" style="margin-bottom:6px">${ser.map(s=>`<span class="chip"><span class="sw" style="background:var(${s[2]})"></span>${s[1]}</span>`).join('')}</div>
+   <div class="mini"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Líneas de movimiento por mes">${g}</svg></div>`;
+}
+function analisisExportSheets(){
+  const d=analisisData();
+  return [{name:'Por mes',rows:d.keys.map(k=>({'Mes':monthLabel(k),'Ingresos':d.mm[k].ingreso,'Consumos':d.mm[k].consumo,'Traspasos':d.mm[k].traspaso}))},
+    {name:'Top '+TLAB[UI.a.tipo].split(' ')[0],rows:d.top.slice(0,50).map(o=>({'Material':o.mat,'Descripción':o.desc,'Líneas':o.n,'Cantidad':o.q,'UM':o.um,'Días con movimiento':o.days.size,'Último movimiento':fmtDate(o.last)}))},
+    {name:'Por usuario',rows:d.users.map(u=>({'Usuario':u.user,'Ingresos':u.ingreso,'Consumos':u.consumo,'Traspasos':u.traspaso,'Total':u.n}))},
+    {name:'Stock sin consumo',rows:d.sinCons.map(o=>({'Material':o.mat,'Nombre':matNom(o.mat),'Ubicaciones':o.locs.size,'Cantidad en stock':o.q,'UM':(S.mats[o.mat]||{}).umb||'','Último consumo registrado':o.last?fmtDate(o.last):'Sin consumos'}))}];
+}
+function analisisPageHTML(){
+  if(!S.mov.length)return vacio('No hay movimientos cargados para analizar.');
+  const a=UI.a;const d=analisisData();const total=d.t.ingreso+d.t.consumo+d.t.traspaso;
+  const nd=d.days.size;
+  return `<div class="filters"><label>Desde<input type="date" id="afrom" value="${a.from}"></label><label>Hasta<input type="date" id="ato" value="${a.to}"></label>
+    <button class="btn ghost sm" id="aclear">Limpiar fechas</button><button class="btn sm" data-exp="analisis">Descargar Excel</button></div>
+   <div class="kcards">
+    ${kcardSimple('Líneas de movimiento',nf.format(total),nd?nf.format(nd)+' días con actividad':'sin fechas','up')}
+    ${kcardSimple('Ingresos',nf.format(d.t.ingreso),total?nf1.format(d.t.ingreso/total*100)+'% del total':'—','up')}
+    ${kcardSimple('Consumos',nf.format(d.t.consumo),total?nf1.format(d.t.consumo/total*100)+'% del total':'—','wn')}
+    ${kcardSimple('Traspasos',nf.format(d.t.traspaso),total?nf1.format(d.t.traspaso/total*100)+'% del total':'—','vi')}</div>
+   <section class="card" style="margin-bottom:16px"><h2>Movimientos por mes (líneas)</h2>${monthlyChart(d)}
+    <p class="note" style="margin:6px 0 0">Promedio: ${nd?nf1.format(total/nd):'—'} líneas por día con actividad.</p></section>
+   <div class="grid cols-2"><section class="card"><h2>Materiales con más movimiento</h2>
+    <div class="seg" role="group" style="margin-bottom:10px">${['ingreso','consumo','traspaso'].map(t=>`<button data-atipo="${t}" aria-pressed="${a.tipo===t}">${TLAB[t].split(' ')[0]}</button>`).join('')}</div>
+    ${d.top.length?`<div class="tablewrap" style="max-height:420px"><table><thead><tr><th>Material</th><th class="num">Líneas</th><th class="num">Cantidad</th><th>Último</th></tr></thead><tbody>
+     ${d.top.slice(0,15).map(o=>`<tr><td class="desc"><button class="link mono" data-amat="${esc(o.mat)}">${esc(o.mat)}</button> ${esc(o.desc)}</td><td class="num">${nf.format(o.n)}</td><td class="num">${fmt(o.q)} ${esc(o.um)}</td><td>${fmtDate(o.last)}</td></tr>`).join('')}</tbody></table></div>`:vacio('No hay movimientos de este tipo en el período.')}</section>
+    <section class="card"><h2>Actividad por usuario</h2>
+    ${d.users.length?`<div class="tablewrap" style="max-height:480px"><table><thead><tr><th>Usuario</th><th class="num">Ingresos</th><th class="num">Consumos</th><th class="num">Traspasos</th><th class="num">Total</th></tr></thead><tbody>
+     ${d.users.map(u=>`<tr><td>${esc(u.user)}</td><td class="num">${nf.format(u.ingreso)}</td><td class="num">${nf.format(u.consumo)}</td><td class="num">${nf.format(u.traspaso)}</td><td class="num"><b>${nf.format(u.n)}</b></td></tr>`).join('')}</tbody></table></div>`:vacio('Sin usuarios en el período.')}</section></div>
+   <section class="card" style="margin-top:16px"><h2>Con stock y sin consumo en el período</h2>
+    ${!S.hasInv?vacio('Se muestra cuando MAESTRO tiene material asignado a ubicaciones.')
+     :d.sinCons.length?`<div class="tablewrap" style="max-height:340px"><table><thead><tr><th>Material</th><th class="num">Ubicaciones</th><th class="num">Cantidad en stock</th><th>Último consumo registrado</th></tr></thead><tbody>
+      ${d.sinCons.slice(0,25).map(o=>{const m=S.mats[o.mat]||{};return `<tr><td class="desc"><button class="link mono" data-stock-mat="${esc(o.mat)}" data-gostock="1">${esc(o.mat)}</button> ${esc(m.nom||'')}</td><td class="num">${nf.format(o.locs.size)}</td><td class="num">${fmt(o.q)} ${esc(m.umb||'')}</td><td>${o.last?fmtDate(o.last):'Sin consumos'}</td></tr>`}).join('')}</tbody></table></div>
+      <p class="note" style="margin:10px 0 0">${nf.format(d.sinCons.length)} materiales con stock no tuvieron consumos en el período${d.sinCons.length>25?' (se muestran 25; el Excel trae todos)':''}. Útil para detectar inventario sin rotación.</p>`
+     :vacio('Todos los materiales con stock tuvieron consumo en el período.')}</section>`;
+}
+function bindAnalisis(){
+  $('#afrom').addEventListener('change',e=>{UI.a.from=e.target.value;render()});
+  $('#ato').addEventListener('change',e=>{UI.a.to=e.target.value;render()});
+  $('#aclear').addEventListener('click',()=>{UI.a.from='';UI.a.to='';render()});
+}
+
+/* ---------- Botones «Descargar Excel» ---------- */
+function doExport(kind){
+  if(!S)return;
+  if(kind==='stock')exportRows('Stock_por_material',stockExportSheets());
+  else if(kind==='libres')exportRows('Ubicaciones_libres',libresExportSheets());
+  else if(kind==='libconf')exportRows('Ubicaciones_a_revisar',[{name:'A revisar',rows:confRows(libresData()).map(r=>({'Ubicación':r.code,'En el plano':r.plano,'Material':r.mat,'Nombre':r.nom,'Lote':r.lote,'Cantidad':r.cant,'UM':r.umb,'Vence':r.venc?fmtDate(r.venc):'','Observación':r.obs,'Qué hacer':CONF_ACCION}))}]);
+  else if(kind==='analisis')exportRows('Analisis_movimientos',analisisExportSheets());
+  else if(kind==='venc')exportRows('Vencimientos',[{name:'Vencimientos',rows:vencItems().map(x=>{const m=S.mats[x.mat]||{};return {'Ubicación':x.loc,'Material':x.mat,'Nombre':m.nom||'','Lote':x.lote,'Cantidad':x.cant,'UM':m.umb||'','Vence':fmtDate(x.venc),'Días para vencer':x.d}})}]);
+  else if(kind==='mov'){
+    const cols=COLS[UI.tab];
+    exportRows('Movimientos_'+UI.tab,[{name:TLAB[UI.tab].split(' ')[0],rows:sorted(filtered()).map(r=>{const o={};cols.forEach(c=>{
+      if(c[3].includes('num')&&c[4]){const v=c[4](r);o[c[1]]=v<0?'':v}else o[c[1]]=String(c[2](r))});return o})}]);
+  }
+}
+
 function copyTable(){
   const cols=COLS[UI.tab];const rows=sorted(filtered());
   const tsv=[cols.map(c=>c[1]).join('\t')].concat(rows.map(r=>cols.map(c=>String(c[2](r)).replace(/\s+/g,' ')).join('\t'))).join('\n');
@@ -900,6 +1189,12 @@ document.addEventListener('click',e=>{
   if(t.dataset.gotoCat!==undefined){UI.map.cats=new Set([t.dataset.gotoCat]);UI.view='mapa';render();return}
   if(t.dataset.gotoLoc){UI.view='mapa';UI.sel=t.dataset.gotoLoc;UI.map.aisle='';UI.map.q=t.dataset.gotoLoc;render();return}
   if(t.dataset.gotoMat){UI.view='movimientos';UI.tab='consumo';UI.f.q=t.dataset.gotoMat;UI.limit=150;render();return}
+  if(t.dataset.stockMat!==undefined){UI.stock.sel=t.dataset.stockMat;if(t.dataset.gostock){UI.view='stock';UI.stock.q='';window.scrollTo(0,0)}render();return}
+  if(t.dataset.exp){doExport(t.dataset.exp);return}
+  if(t.dataset.atipo){UI.a.tipo=t.dataset.atipo;render();return}
+  if(t.dataset.amat){UI.view='movimientos';UI.tab=UI.a.tipo;UI.f={from:UI.a.from,to:UI.a.to,q:t.dataset.amat,user:'',um:''};UI.sort={k:'fecha',dir:-1};UI.limit=150;render();window.scrollTo(0,0);return}
+  if(t.dataset.libconf){UI.lib.conf=!UI.lib.conf;render();return}
+  if(t.dataset.libaisle!==undefined){UI.lib.aisle=t.dataset.libaisle;UI.lib.limit=300;render();return}
   if(t.dataset.q){UI.f.q=t.dataset.q;UI.limit=150;render();return}
   if(t.dataset.tab){UI.tab=t.dataset.tab;UI.f.um='';UI.sort={k:'fecha',dir:-1};UI.limit=150;render();return}
   if(t.dataset.sort){UI.sort=UI.sort.k===t.dataset.sort?{k:t.dataset.sort,dir:-UI.sort.dir}:{k:t.dataset.sort,dir:1};render();return}
